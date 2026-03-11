@@ -41,39 +41,39 @@ const ChatInterface = ({ messages, onSendMessage, loading, error, currentSession
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <h2 className="text-2xl font-semibold text-accent mb-2">
-                Welcome to APSIT AI Assistant
+                Welcome to VaultRAG
               </h2>
               <p className="text-gray-400 mb-6">
-                Ask me anything about A.P. Shah Institute of Technology - admissions, courses, facilities, and more!
+                Upload your documents and ask questions — I'll find answers from your knowledge base!
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
                 <button
-                  onClick={() => onSendMessage('What IT courses does APSIT offer?')}
+                  onClick={() => onSendMessage('What topics are covered in my documents?')}
                   className="p-4 bg-background-card border border-background-dark rounded-lg hover:bg-primary-600 hover:text-white text-left transition-colors"
                 >
-                  <div className="font-medium text-accent">IT Courses</div>
-                  <div className="text-sm text-gray-400">What IT courses does APSIT offer?</div>
+                  <div className="font-medium text-accent">Overview</div>
+                  <div className="text-sm text-gray-400">What topics are covered in my documents?</div>
                 </button>
                 <button
-                  onClick={() => onSendMessage('How do I apply for admission to APSIT?')}
+                  onClick={() => onSendMessage('Summarize the key points from the uploaded files.')}
                   className="p-4 bg-background-card border border-background-dark rounded-lg hover:bg-primary-600 hover:text-white text-left transition-colors"
                 >
-                  <div className="font-medium text-accent">Admissions</div>
-                  <div className="text-sm text-gray-400">How do I apply for admission?</div>
+                  <div className="font-medium text-accent">Summary</div>
+                  <div className="text-sm text-gray-400">Summarize key points from uploaded files</div>
                 </button>
                 <button
-                  onClick={() => onSendMessage('What facilities are available at APSIT?')}
+                  onClick={() => onSendMessage('What are the most important details in my knowledge base?')}
                   className="p-4 bg-background-card border border-background-dark rounded-lg hover:bg-primary-600 hover:text-white text-left transition-colors"
                 >
-                  <div className="font-medium text-accent">Facilities</div>
-                  <div className="text-sm text-gray-400">What facilities are available?</div>
+                  <div className="font-medium text-accent">Key Details</div>
+                  <div className="text-sm text-gray-400">Important details in my knowledge base</div>
                 </button>
                 <button
-                  onClick={() => onSendMessage('What is the fee structure at APSIT?')}
+                  onClick={() => onSendMessage('Help me understand the content I uploaded.')}
                   className="p-4 bg-background-card border border-background-dark rounded-lg hover:bg-primary-600 hover:text-white text-left transition-colors"
                 >
-                  <div className="font-medium text-accent">Fees</div>
-                  <div className="text-sm text-gray-400">What is the fee structure?</div>
+                  <div className="font-medium text-accent">Understand</div>
+                  <div className="text-sm text-gray-400">Help me understand uploaded content</div>
                 </button>
               </div>
             </div>

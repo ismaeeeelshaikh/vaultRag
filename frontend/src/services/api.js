@@ -49,6 +49,18 @@ export const chatSessionAPI = {
   startChatSession: (question) => api.post('/chat-sessions/start', { question }),
 };
 
+export const documentAPI = {
+  upload: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/documents/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  list: () => api.get('/documents/list'),
+  delete: (filename) => api.delete(`/documents/${encodeURIComponent(filename)}`),
+};
+
 export const chatAPI = {
   sendMessage: (message) => api.post('/chat', { question: message }),
   getHistory: () => api.get('/chat/history'),

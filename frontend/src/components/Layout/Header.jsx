@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LogOut, User } from 'lucide-react';
+import { LogOut, User, FolderUp } from 'lucide-react';
+import DocumentUpload from '../Documents/DocumentUpload';
 
 const Header = () => {
   const { user, logout } = useAuth();
+  const [showUpload, setShowUpload] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -58,6 +60,14 @@ const Header = () => {
               </span>
             </div>
             <button
+              onClick={() => setShowUpload(true)}
+              className="flex items-center space-x-2 px-3 py-1 text-accent hover:text-white rounded-md hover:bg-primary-600 transition-colors"
+              title="Upload Documents"
+            >
+              <FolderUp className="h-4 w-4" />
+              <span className="text-sm">Documents</span>
+            </button>
+            <button
               onClick={handleLogout}
               className="flex items-center space-x-2 px-3 py-1 text-accent hover:text-white rounded-md hover:bg-primary-600 transition-colors"
               title="Logout"
@@ -68,6 +78,7 @@ const Header = () => {
           </div>
         </div>
       </div>
+      <DocumentUpload isOpen={showUpload} onClose={() => setShowUpload(false)} />
     </header>
   );
 };

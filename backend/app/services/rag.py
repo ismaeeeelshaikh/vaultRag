@@ -14,8 +14,6 @@ from langchain.storage import InMemoryStore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import TextLoader
 from langchain_community.embeddings import SentenceTransformerEmbeddings
-from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from langchain_community.vectorstores import Chroma
 from langchain_groq import ChatGroq
 
@@ -34,7 +32,6 @@ class RAGService:
 
         self.embeddings: Optional[SentenceTransformerEmbeddings] = None
         self.llm: Optional[ChatGroq] = None
-        self.search_tool: Optional[DuckDuckGoSearchRun] = None
         self.retriever: Optional[ParentDocumentRetriever] = None
 
         self.session_conversations: Dict[int, Dict[int, List[Dict[str, str]]]] = {}
@@ -63,9 +60,6 @@ class RAGService:
                 model_name="llama-3.3-70b-versatile",
                 temperature=0.3,
             )
-            self.search_tool = DuckDuckGoSearchRun(
-                api_wrapper=DuckDuckGoSearchAPIWrapper(max_results=5)
-            )
             self._init_done = True
             self._ensure_retriever_ready()
             logger.info("RAG components initialized.")
@@ -86,7 +80,7 @@ class RAGService:
             logger.error("Failed to save conversation memory: %s", exc)
 
     def _collect_source_files(self) -> List[Path]:
-        allowed_suffixes = {".txt", ".md", ".pdf"}
+        allowed_suffixes = {".txt", ".md", ".pdf", ".docx"}
         files: List[Path] = []
         for directory in self.data_dirs:
             if not directory.exists() or not directory.is_dir():
@@ -201,6 +195,19 @@ class RAGService:
                         )
                         continue
                     documents.extend(PyPDFLoader(str(path)).load())
+                elif extension == ".docx":
+                    try:
+                        from docx import Document as DocxDocument
+                    except Exception:
+                        logger.warning(
+                            "Skipping DOCX %s because python-docx is not available.",
+                            path.name,
+                        )
+                        continue
+                    doc = DocxDocument(str(path))
+                    text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+                    if text:
+                        documents.append(Document(page_content=text, metadata={"source": str(path)}))
             except Exception as exc:
                 logger.warning("Failed to parse %s: %s", path, exc)
         return documents
@@ -293,39 +300,6 @@ class RAGService:
         )
         self._save_conversation_memory()
 
-    def _perform_web_search(self, question: str) -> str:
-        if self.search_tool is None:
-            return ""
-
-        try:
-            q_lower = question.lower()
-
-            if "hod" in q_lower or "head of department" in q_lower:
-                dept = ""
-                if "civil" in q_lower:
-                    dept = "Civil Engineering"
-                elif "computer" in q_lower:
-                    dept = "Computer Engineering"
-                elif "it" in q_lower or "information" in q_lower:
-                    dept = "Information Technology"
-                elif "mech" in q_lower:
-                    dept = "Mechanical Engineering"
-                elif "aiml" in q_lower:
-                    dept = "AIML"
-                elif "ds" in q_lower or "data" in q_lower:
-                    dept = "Data Science"
-                search_query = f'"Head of Department" {dept} faculty list site:apsit.edu.in'
-            elif "principal" in q_lower:
-                search_query = '"Principal" name site:apsit.edu.in'
-            else:
-                search_query = f"{question} site:apsit.edu.in"
-
-            logger.info("Executing smart search: %s", search_query)
-            return self.search_tool.run(search_query)
-        except Exception as exc:
-            logger.error("Web search failed: %s", exc)
-            return ""
-
     def get_response_for_session(self, question: str, user_id: int, session_id: int) -> str:
         try:
             self._ensure_initialized()
@@ -352,32 +326,19 @@ class RAGService:
             except Exception:
                 db_context = ""
 
-        web_context = ""
-        if len(question.split()) > 1:
-            web_context = self._perform_web_search(question)
+        final_prompt = f"""You are a helpful AI assistant that answers questions based on the user's uploaded documents.
 
-        knowledge_base = f"""
-        [SOURCE 1: LIVE WEB SEARCH (HIGHEST PRIORITY)]:
-        {web_context}
-
-        [SOURCE 2: INTERNAL DATABASE (SECONDARY)]:
-        {db_context}
-        """
-
-        final_prompt = f"""You are a smart senior student at APSIT.
-
-        **CRITICAL INSTRUCTIONS:**
-        1. **Conflict Rule:** If Source 1 and Source 2 disagree on a person's name/role, **Source 1 (Web) is the TRUTH**.
-        2. **HOD Check:** When checking for "HOD" or "Head of Department", look for the exact name listed next to that title in Source 1. Ignore "Assistant Professor" names unless they are explicitly called HOD.
-        3. **Correction:** If the user corrects you (e.g., "Mugdha is HOD"), trust the user and double-check Source 1.
-        4. **Persona:** {style_instruction} Be helpful and confident.
+        **INSTRUCTIONS:**
+        1. Answer based on the provided knowledge base context below.
+        2. If the answer is not found in the context, say so honestly.
+        3. {style_instruction} Be helpful and accurate.
 
         **CONTEXT:**
-        History: {history_text}
+        Conversation History: {history_text}
         User Question: {question}
 
-        **INFORMATION:**
-        {knowledge_base}
+        **KNOWLEDGE BASE:**
+        {db_context}
 
         **ANSWER:**"""
 
@@ -400,6 +361,62 @@ class RAGService:
         ):
             del self.session_conversations[user_id][session_id]
             self._save_conversation_memory()
+
+    def ingest_uploaded_file(self, file_path: Path) -> bool:
+        """Ingest a single uploaded file into the vector store."""
+        try:
+            self._ensure_initialized()
+            documents = self._load_documents([file_path])
+            if not documents:
+                logger.warning("No content extracted from %s", file_path)
+                return False
+
+            with self._index_lock:
+                if self.retriever is None:
+                    docstore = self._load_docstore() if self.docstore_file.exists() else InMemoryStore()
+                    self.retriever = self._build_retriever(docstore)
+
+                self.retriever.add_documents(documents, ids=None)
+
+                # Save docstore to persist newly added vectors
+                if hasattr(self.retriever, "docstore"):
+                    self._save_docstore(self.retriever.docstore)
+
+                # Update fingerprint so it doesn't rebuild unnecessarily
+                source_files = self._collect_source_files()
+                fingerprint = self._compute_source_fingerprint(source_files)
+                self._save_fingerprint(fingerprint)
+                self._loaded_fingerprint = fingerprint
+
+            logger.info("Successfully ingested file: %s (%d documents)", file_path.name, len(documents))
+            return True
+        except Exception as exc:
+            logger.error("Failed to ingest file %s: %s", file_path, exc, exc_info=True)
+            return False
+
+    def get_uploaded_files(self) -> List[Dict[str, str]]:
+        """Return list of files in temp_uploads directory."""
+        upload_dir = Path("temp_uploads")
+        if not upload_dir.exists():
+            return []
+        allowed = {".txt", ".pdf", ".docx", ".md"}
+        files = []
+        for f in sorted(upload_dir.iterdir()):
+            if f.is_file() and f.suffix.lower() in allowed:
+                files.append({"name": f.name, "size": f.stat().st_size})
+        return files
+
+    def delete_uploaded_file(self, filename: str) -> bool:
+        """Delete a file from temp_uploads."""
+        upload_dir = Path("temp_uploads")
+        file_path = (upload_dir / filename).resolve()
+        # Ensure the resolved path is still within upload_dir
+        if not str(file_path).startswith(str(upload_dir.resolve())):
+            return False
+        if file_path.exists() and file_path.is_file():
+            file_path.unlink()
+            return True
+        return False
 
 
 rag_service = RAGService()
