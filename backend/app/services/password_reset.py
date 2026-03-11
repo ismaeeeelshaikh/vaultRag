@@ -1,26 +1,27 @@
 import random
 from datetime import datetime, timedelta
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
+from fastapi_mail import ConnectionConfig, FastMail, MessageSchema
 from passlib.context import CryptContext
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update
 
 from ..models.user import User
 from ..models.password_reset_token import PasswordResetToken
+from ..config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 conf = ConnectionConfig(
-    MAIL_USERNAME="shaikhaptab15@gmail.com",
-    MAIL_PASSWORD="oyqzypgoormoiabh",
-    MAIL_FROM="shaikhaptab15@gmail.com",
-    MAIL_PORT=587,
-    MAIL_SERVER="smtp.gmail.com",
-    MAIL_STARTTLS=True,
-    MAIL_SSL_TLS=False,
+    MAIL_USERNAME=settings.MAIL_USERNAME,
+    MAIL_PASSWORD=settings.MAIL_PASSWORD,
+    MAIL_FROM=settings.MAIL_FROM,
+    MAIL_PORT=settings.MAIL_PORT,
+    MAIL_SERVER=settings.MAIL_SERVER,
+    MAIL_STARTTLS=settings.MAIL_TLS,
+    MAIL_SSL_TLS=settings.MAIL_SSL,
     USE_CREDENTIALS=True,
+    VALIDATE_CERTS=True,
 )
 
 def generate_otp() -> str:

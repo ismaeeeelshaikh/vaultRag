@@ -5,7 +5,7 @@ import asyncpg
 async def test_connection():
     try:
         # Test with ai_user
-        conn = await asyncpg.connect("postgresql://ai_user:password123@localhost:5432/college_ai")
+        conn = await asyncpg.connect("postgresql://vault_ai:123456@localhost:5432/privacyDB")
         result = await conn.fetch("SELECT version()")
         print("✅ Connection successful with ai_user!")
         print(f"PostgreSQL version: {result[0][0]}")

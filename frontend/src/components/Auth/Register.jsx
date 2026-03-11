@@ -72,7 +72,10 @@ const Register = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: formData.email.trim().toLowerCase() }),
       });
-      if (!res.ok) throw new Error('Failed to send OTP');
+      const result = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(result?.detail || 'Failed to send OTP');
+      }
 
       navigate('/verify-signup-otp', { state: {
         username: formData.username,
@@ -80,8 +83,7 @@ const Register = () => {
         password: formData.password
       }});
     } catch (err) {
-      alert('Could not send OTP. Please try again or use another email.');
-      setError('Could not send OTP. Please try again or use another email.');
+      setError(err.message || 'Could not send OTP. Please try again.');
     } finally {
       setLoading(false);
     }

@@ -67,8 +67,11 @@ class SignupWithOtp(BaseModel):
 @router.post("/request-signup-otp")
 async def request_signup_otp(payload: EmailSchema, db: AsyncSession = Depends(get_db)):
     otp = await generate_and_store_otp(payload.email, db)
-    await send_otp_email(payload.email, otp)
-    return {"message": "OTP sent to email if it exists."}
+    email_sent = await send_otp_email(payload.email, otp)
+    if email_sent:
+        return {"message": "OTP sent to your email.", "email_sent": True}
+    else:
+        return {"message": "Email service failed. Check server console for OTP.", "email_sent": False}
 
 @router.post("/complete-signup")
 async def complete_signup(data: SignupWithOtp, db: AsyncSession = Depends(get_db)):

@@ -12,7 +12,6 @@
 2. npm install
 3. npm run dev
 
-# For resetting knowledge base, we need to use -> when we add new data after adding just make sure to fire this command
-del vectorstore.pkl
-
-# after running above command again run backend server so that updated data should be fetched
+# Knowledge base refresh
+# New files placed in backend/college_data or backend/temp_uploads are auto-detected.
+# Restart command is not required just for index refresh; the backend rebuilds index when files change.

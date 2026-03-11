@@ -28,15 +28,14 @@ const VerifySignupOtp = () => {
     setError('');
 
     try {
-      const response = await fetch('/apiauth/complete-signup', {
+      const response = await fetch('/api/auth/complete-signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, email, password, otp }),
       });
-
+      const result = await response.json().catch(() => null);
       if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(errText || 'OTP verification failed');
+        throw new Error(result?.detail || 'OTP verification failed');
       }
 
       // On success redirect to login page or dashboard
