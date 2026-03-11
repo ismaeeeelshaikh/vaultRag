@@ -1,7 +1,8 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import ChatSessionLayout from './components/Layout/ChatSessionLayout';  // Updated
+import ChatSessionLayout from './components/Layout/ChatSessionLayout';
+import LandingPage from './components/LandingPage';
 import Login from './components/Auth/Login';
 import Register from './components/Auth/Register';
 import ForgotPassword from "./components/Auth/ForgotPassword";
@@ -23,7 +24,7 @@ const PrivateRoute = ({ children }) => {
     );
   }
   
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  return isAuthenticated ? children : <Navigate to="/" replace />;
 };
 
 function App() {
@@ -32,6 +33,7 @@ function App() {
       <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <div className="App">
           <Routes>
+            <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
              <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -39,7 +41,7 @@ function App() {
              <Route path="/verify-signup-otp" element={<VerifySignupOtp />} />
 
             <Route
-              path="/"
+              path="/chat"
               element={
                 <PrivateRoute>
                   <ChatSessionLayout />
