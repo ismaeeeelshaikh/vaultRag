@@ -82,7 +82,8 @@ class ChatSessionService:
         await db.flush()  # Get the ID without committing
         
         # Get AI response
-        answer = rag_service.get_response_for_session(question, user_id, chat_session.id)
+        result = rag_service.get_response_for_session(question, user_id, chat_session.id)
+        answer = result["answer"] if isinstance(result, dict) else result
         
         # Save the first message
         message = ChatMessage(
@@ -181,7 +182,8 @@ class ChatSessionService:
             raise ValueError("Chat session not found")
             
         # Get AI response using session-specific memory
-        answer = rag_service.get_response_for_session(question, user_id, session_id)
+        result = rag_service.get_response_for_session(question, user_id, session_id)
+        answer = result["answer"] if isinstance(result, dict) else result
         
         # Save message
         message = ChatMessage(
