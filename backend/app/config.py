@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     MAIL_TLS: bool
     MAIL_SSL: bool
     
+    # Production settings
+    FRONTEND_URL: str = "http://localhost:5173"
+    ENVIRONMENT: str = "development"
+    
     class Config:
         env_file = ".env"
 

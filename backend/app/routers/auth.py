@@ -66,6 +66,16 @@ class SignupWithOtp(BaseModel):
 
 @router.post("/request-signup-otp")
 async def request_signup_otp(payload: EmailSchema, db: AsyncSession = Depends(get_db)):
+    # Check if email is already registered
+    from sqlalchemy import select
+    from ..models.user import User
+    existing = await db.execute(select(User).filter(User.email == payload.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This email is already registered. Please login or try with a different email."
+        )
+
     otp = await generate_and_store_otp(payload.email, db)
     email_sent = await send_otp_email(payload.email, otp)
     if email_sent:

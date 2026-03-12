@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import pickle
+import tempfile
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -23,29 +24,25 @@ logger = logging.getLogger(__name__)
 
 class RAGService:
     def __init__(self):
-        # Storage paths
-        self.chroma_dir = Path("./chroma_db_final")
-        self.docstore_file = Path("docstore.pkl")
-        self.memory_file = Path("conversation_memory.pkl")
-        self.index_meta_file = Path("rag_index_meta.json")
-
-        # Data source folders
-        self.data_dirs = [Path("college_data"), Path("temp_uploads")]
-        self.collection_name = "split_by_section"
+        # Base storage path (for ChromaDB collections per user)
+        self.chroma_base_dir = Path("./chroma_db_users")
+        self.chroma_base_dir.mkdir(exist_ok=True)
 
         # Core components
         self.embeddings: Optional[SentenceTransformerEmbeddings] = None
         self.llm: Optional[ChatGroq] = None
-        self.retriever: Optional[ParentDocumentRetriever] = None
+
+        # Per-user retrievers: {user_id: ParentDocumentRetriever}
+        self._user_retrievers: Dict[int, ParentDocumentRetriever] = {}
+        self._user_docstores: Dict[int, InMemoryStore] = {}
 
         # Session memory: {user_id: {session_id: [{"question": "...", "answer": "..."}]}}
         self.session_conversations: Dict[int, Dict[int, List[Dict[str, str]]]] = {}
 
         # Runtime state
-        self._loaded_fingerprint: Optional[str] = None
         self._init_done = False
         self._init_lock = threading.Lock()
-        self._index_lock = threading.Lock()
+        self._user_locks: Dict[int, threading.Lock] = {}
 
         # Tuning
         self.MAX_HISTORY_MESSAGES = 20
@@ -53,8 +50,12 @@ class RAGService:
         self.MAX_RETRIEVED_DOCS = 4
         self.MAX_CHARS_PER_DOC = 2000
 
-        self._load_conversation_memory()
         logger.info("RAG service created. Components will load on first query.")
+
+    def _get_user_lock(self, user_id: int) -> threading.Lock:
+        if user_id not in self._user_locks:
+            self._user_locks[user_id] = threading.Lock()
+        return self._user_locks[user_id]
 
     # =========================================================
     # INITIALIZATION
@@ -73,8 +74,6 @@ class RAGService:
             if not groq_key:
                 raise ValueError("GROQ_API_KEY is not set in environment variables.")
 
-            # Faster for demo: BAAI/bge-small-en-v1.5
-            # Better quality: BAAI/bge-base-en-v1.5
             self.embeddings = SentenceTransformerEmbeddings(
                 model_name="BAAI/bge-base-en-v1.5"
             )
@@ -86,33 +85,11 @@ class RAGService:
             )
 
             self._init_done = True
-            self._ensure_retriever_ready()
-
             logger.info("RAG components initialized successfully.")
 
     # =========================================================
-    # CONVERSATION MEMORY
+    # CONVERSATION MEMORY (in-memory, per session)
     # =========================================================
-    def _load_conversation_memory(self):
-        if self.memory_file.exists():
-            try:
-                with self.memory_file.open("rb") as handle:
-                    loaded = pickle.load(handle)
-                    if isinstance(loaded, dict):
-                        self.session_conversations = loaded
-                    else:
-                        self.session_conversations = {}
-            except Exception as exc:
-                logger.warning("Failed to load conversation memory: %s", exc)
-                self.session_conversations = {}
-
-    def _save_conversation_memory(self):
-        try:
-            with self.memory_file.open("wb") as handle:
-                pickle.dump(self.session_conversations, handle)
-        except Exception as exc:
-            logger.error("Failed to save conversation memory: %s", exc)
-
     def _get_session_history(self, user_id: int, session_id: int) -> List[Dict[str, str]]:
         return self.session_conversations.get(user_id, {}).get(session_id, [])
 
@@ -127,11 +104,8 @@ class RAGService:
         history = self.session_conversations[user_id][session_id]
         history.append({"question": question, "answer": answer})
 
-        # Limit history size
         if len(history) > self.MAX_HISTORY_MESSAGES:
             self.session_conversations[user_id][session_id] = history[-self.MAX_HISTORY_MESSAGES:]
-
-        self._save_conversation_memory()
 
     def clear_session_memory(self, user_id: int, session_id: int):
         if (
@@ -139,71 +113,63 @@ class RAGService:
             and session_id in self.session_conversations[user_id]
         ):
             del self.session_conversations[user_id][session_id]
-            self._save_conversation_memory()
 
     # =========================================================
-    # FILE DISCOVERY / FINGERPRINT
+    # PER-USER VECTORSTORE & RETRIEVER
     # =========================================================
-    def _collect_source_files(self) -> List[Path]:
-        allowed_suffixes = {".txt", ".md", ".pdf", ".docx"}
-        files: List[Path] = []
+    def _user_chroma_dir(self, user_id: int) -> Path:
+        return self.chroma_base_dir / f"user_{user_id}"
 
-        for directory in self.data_dirs:
-            if not directory.exists() or not directory.is_dir():
-                continue
+    def _user_docstore_file(self, user_id: int) -> Path:
+        return self.chroma_base_dir / f"user_{user_id}_docstore.pkl"
 
-            for path in directory.rglob("*"):
-                if path.is_file() and path.suffix.lower() in allowed_suffixes:
-                    files.append(path)
+    def _collection_name(self, user_id: int) -> str:
+        return f"user_{user_id}_docs"
 
-        files.sort(key=lambda item: str(item).lower())
-        return files
+    def _create_vectorstore(self, user_id: int) -> Chroma:
+        if self.embeddings is None:
+            raise RuntimeError("Embeddings not initialized.")
 
-    def _compute_source_fingerprint(self, files: List[Path]) -> Optional[str]:
-        if not files:
-            return None
+        chroma_dir = self._user_chroma_dir(user_id)
+        chroma_dir.mkdir(parents=True, exist_ok=True)
 
-        digest = hashlib.sha256()
-        for path in files:
-            try:
-                stats = path.stat()
-                digest.update(str(path.resolve()).encode("utf-8"))
-                digest.update(str(stats.st_size).encode("utf-8"))
-                digest.update(str(stats.st_mtime_ns).encode("utf-8"))
-            except Exception as exc:
-                logger.warning("Could not stat file %s for fingerprint: %s", path, exc)
+        return Chroma(
+            collection_name=self._collection_name(user_id),
+            embedding_function=self.embeddings,
+            persist_directory=str(chroma_dir),
+        )
 
-        return digest.hexdigest()
+    def _build_retriever(
+        self, user_id: int, docstore: InMemoryStore, vectorstore: Optional[Chroma] = None
+    ) -> ParentDocumentRetriever:
+        parent_splitter = RecursiveCharacterTextSplitter(
+            separators=["\n=== ", "\n## ", "\n# ", "\n\n", "\n", " "],
+            chunk_size=2000,
+            chunk_overlap=200,
+        )
 
-    def _load_saved_fingerprint(self) -> Optional[str]:
-        if not self.index_meta_file.exists():
-            return None
+        child_splitter = RecursiveCharacterTextSplitter(
+            separators=["\n\n", "\n", ". ", " ", ""],
+            chunk_size=400,
+            chunk_overlap=80,
+        )
 
-        try:
-            with self.index_meta_file.open("r", encoding="utf-8") as handle:
-                data = json.load(handle)
-                return data.get("fingerprint")
-        except Exception as exc:
-            logger.warning("Failed to load index metadata: %s", exc)
-            return None
+        vectorstore = vectorstore or self._create_vectorstore(user_id)
 
-    def _save_fingerprint(self, fingerprint: Optional[str]):
-        try:
-            payload = {"fingerprint": fingerprint}
-            with self.index_meta_file.open("w", encoding="utf-8") as handle:
-                json.dump(payload, handle)
-        except Exception as exc:
-            logger.warning("Failed to save index metadata: %s", exc)
+        return ParentDocumentRetriever(
+            vectorstore=vectorstore,
+            docstore=docstore,
+            child_splitter=child_splitter,
+            parent_splitter=parent_splitter,
+        )
 
-    # =========================================================
-    # DOCSTORE PERSISTENCE
-    # =========================================================
-    def _load_docstore(self) -> InMemoryStore:
-        if not self.docstore_file.exists():
+    def _load_user_docstore(self, user_id: int) -> InMemoryStore:
+        docstore_file = self._user_docstore_file(user_id)
+        if not docstore_file.exists():
             return InMemoryStore()
 
         try:
-            with self.docstore_file.open("rb") as handle:
+            with docstore_file.open("rb") as handle:
                 loaded = pickle.load(handle)
 
             if isinstance(loaded, InMemoryStore):
@@ -220,254 +186,131 @@ class RAGService:
                 return store
 
         except Exception as exc:
-            logger.warning("Unable to load docstore. Rebuild may be required: %s", exc)
+            logger.warning("Unable to load docstore for user %d: %s", user_id, exc)
 
         return InMemoryStore()
 
-    def _save_docstore(self, store: InMemoryStore):
+    def _save_user_docstore(self, user_id: int, store: InMemoryStore):
         try:
-            with self.docstore_file.open("wb") as handle:
+            docstore_file = self._user_docstore_file(user_id)
+            with docstore_file.open("wb") as handle:
                 pickle.dump(store, handle)
         except Exception as exc:
-            logger.warning("Failed to save docstore: %s", exc)
+            logger.warning("Failed to save docstore for user %d: %s", user_id, exc)
 
-    # =========================================================
-    # VECTORSTORE / RETRIEVER
-    # =========================================================
-    def _create_vectorstore(self) -> Chroma:
-        if self.embeddings is None:
-            raise RuntimeError("Embeddings not initialized.")
+    def _get_user_retriever(self, user_id: int) -> Optional[ParentDocumentRetriever]:
+        """Get or load the retriever for a specific user."""
+        if user_id in self._user_retrievers:
+            return self._user_retrievers[user_id]
 
-        return Chroma(
-            collection_name=self.collection_name,
-            embedding_function=self.embeddings,
-            persist_directory=str(self.chroma_dir),
-        )
+        lock = self._get_user_lock(user_id)
+        with lock:
+            if user_id in self._user_retrievers:
+                return self._user_retrievers[user_id]
 
-    def _build_retriever(
-        self, docstore: InMemoryStore, vectorstore: Optional[Chroma] = None
-    ) -> ParentDocumentRetriever:
-        parent_splitter = RecursiveCharacterTextSplitter(
-            separators=["\n=== ", "\n## ", "\n# ", "\n\n", "\n", " "],
-            chunk_size=2000,
-            chunk_overlap=200,
-        )
+            chroma_dir = self._user_chroma_dir(user_id)
+            docstore_file = self._user_docstore_file(user_id)
 
-        child_splitter = RecursiveCharacterTextSplitter(
-            separators=["\n\n", "\n", ". ", " ", ""],
-            chunk_size=400,
-            chunk_overlap=80,
-        )
+            if chroma_dir.exists() and docstore_file.exists():
+                try:
+                    docstore = self._load_user_docstore(user_id)
+                    retriever = self._build_retriever(user_id, docstore)
+                    self._user_retrievers[user_id] = retriever
+                    self._user_docstores[user_id] = docstore
+                    logger.info("Loaded existing vector index for user %d", user_id)
+                    return retriever
+                except Exception as exc:
+                    logger.warning("Failed to load retriever for user %d: %s", user_id, exc)
 
-        vectorstore = vectorstore or self._create_vectorstore()
-
-        return ParentDocumentRetriever(
-            vectorstore=vectorstore,
-            docstore=docstore,
-            child_splitter=child_splitter,
-            parent_splitter=parent_splitter,
-        )
+        return None
 
     # =========================================================
     # DOCUMENT LOADING
     # =========================================================
-    def _normalize_doc_metadata(self, doc: Document, path: Path):
+    def _normalize_doc_metadata(self, doc: Document, filename: str, filetype: str, user_id: int):
         doc.metadata = doc.metadata or {}
-        doc.metadata["source"] = str(path)
-        doc.metadata["filename"] = path.name
-        doc.metadata["filetype"] = path.suffix.lower()
-        doc.metadata["origin"] = "temp_uploads" if "temp_uploads" in str(path) else "college_data"
+        doc.metadata["filename"] = filename
+        doc.metadata["filetype"] = filetype
+        doc.metadata["user_id"] = str(user_id)
 
-    def _load_documents(self, files: List[Path]) -> List[Document]:
+    def _load_documents_from_bytes(self, file_content: bytes, filename: str, user_id: int) -> List[Document]:
+        """Load documents from raw file bytes (from PostgreSQL)."""
         documents: List[Document] = []
+        extension = Path(filename).suffix.lower()
 
-        for path in files:
-            extension = path.suffix.lower()
+        try:
+            # Write to temp file for processing
+            with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
+                tmp.write(file_content)
+                tmp_path = Path(tmp.name)
 
             try:
                 if extension in {".txt", ".md"}:
-                    loader = TextLoader(str(path), encoding="utf-8")
+                    loader = TextLoader(str(tmp_path), encoding="utf-8")
                     loaded_docs = loader.load()
-
                     for doc in loaded_docs:
-                        self._normalize_doc_metadata(doc, path)
-
+                        self._normalize_doc_metadata(doc, filename, extension, user_id)
                     documents.extend(loaded_docs)
 
                 elif extension == ".pdf":
                     try:
                         from langchain_community.document_loaders import PyPDFLoader
                     except Exception:
-                        logger.warning(
-                            "Skipping PDF %s because pypdf is not available.",
-                            path.name,
-                        )
-                        continue
+                        logger.warning("Skipping PDF %s because pypdf is not available.", filename)
+                        return documents
 
-                    loaded_docs = PyPDFLoader(str(path)).load()
+                    loaded_docs = PyPDFLoader(str(tmp_path)).load()
                     for doc in loaded_docs:
-                        self._normalize_doc_metadata(doc, path)
-
+                        self._normalize_doc_metadata(doc, filename, extension, user_id)
                     documents.extend(loaded_docs)
 
                 elif extension == ".docx":
                     try:
                         from docx import Document as DocxDocument
                     except Exception:
-                        logger.warning(
-                            "Skipping DOCX %s because python-docx is not available.",
-                            path.name,
-                        )
-                        continue
+                        logger.warning("Skipping DOCX %s because python-docx is not available.", filename)
+                        return documents
 
-                    docx_file = DocxDocument(str(path))
+                    docx_file = DocxDocument(str(tmp_path))
                     text = "\n".join([p.text for p in docx_file.paragraphs if p.text.strip()])
 
                     if text:
                         doc = Document(page_content=text, metadata={})
-                        self._normalize_doc_metadata(doc, path)
+                        self._normalize_doc_metadata(doc, filename, extension, user_id)
                         documents.append(doc)
 
-            except Exception as exc:
-                logger.warning("Failed to parse %s: %s", path, exc)
+            finally:
+                # Clean up temp file
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+
+        except Exception as exc:
+            logger.warning("Failed to parse %s: %s", filename, exc)
 
         return documents
 
     # =========================================================
-    # RETRIEVER LOADING / REBUILD
-    # =========================================================
-    def _load_existing_retriever(self) -> bool:
-        if not self.chroma_dir.exists() or not self.docstore_file.exists():
-            return False
-
-        try:
-            docstore = self._load_docstore()
-            self.retriever = self._build_retriever(docstore)
-            return True
-        except Exception as exc:
-            logger.warning("Failed to load existing vector index: %s", exc)
-            self.retriever = None
-            return False
-
-    def _rebuild_retriever(self, source_files: List[Path], fingerprint: Optional[str]) -> bool:
-        documents = self._load_documents(source_files)
-
-        if not documents:
-            logger.warning("No readable files found. Keeping previous vector index.")
-            return False
-
-        docstore = InMemoryStore()
-
-        # Delete only collection (safer than deleting whole chroma folder while app is running)
-        try:
-            cleanup_store = self._create_vectorstore()
-            cleanup_store.delete_collection()
-            logger.info("Deleted old Chroma collection before rebuild.")
-        except Exception as exc:
-            logger.info("Could not delete old collection (may not exist yet): %s", exc)
-
-        vectorstore = self._create_vectorstore()
-        self.retriever = self._build_retriever(docstore, vectorstore=vectorstore)
-
-        self.retriever.add_documents(documents, ids=None)
-
-        # Save docstore
-        self._save_docstore(docstore)
-
-        # Persist vectorstore
-        try:
-            vectorstore.persist()
-        except Exception:
-            pass
-
-        self._save_fingerprint(fingerprint)
-        self._loaded_fingerprint = fingerprint
-
-        logger.info("Rebuilt vector index with %s loaded documents.", len(documents))
-        return True
-
-    def _ensure_retriever_ready(self):
-        with self._index_lock:
-            source_files = self._collect_source_files()
-            current_fingerprint = self._compute_source_fingerprint(source_files)
-            saved_fingerprint = self._load_saved_fingerprint()
-            has_saved_index = self.chroma_dir.exists() and self.docstore_file.exists()
-
-            if self.retriever is not None and current_fingerprint == self._loaded_fingerprint:
-                return
-
-            if source_files and current_fingerprint != saved_fingerprint:
-                logger.info("Knowledge files changed. Rebuilding vector index.")
-                if self._rebuild_retriever(source_files, current_fingerprint):
-                    return
-
-            if self.retriever is None and has_saved_index:
-                if self._load_existing_retriever():
-                    self._loaded_fingerprint = saved_fingerprint or current_fingerprint
-                    logger.info("Loaded existing vector index from disk.")
-                    return
-
-            if self.retriever is None and source_files:
-                self._rebuild_retriever(source_files, current_fingerprint)
-                return
-
-            if self.retriever is None and not has_saved_index:
-                logger.warning(
-                    "No vector index available yet. Add files in college_data or temp_uploads."
-                )
-
-    def rebuild_index_now(self) -> bool:
-        """
-        Force full rebuild from current files.
-        Useful after deleting uploaded files.
-        """
-        try:
-            self._ensure_initialized()
-
-            with self._index_lock:
-                source_files = self._collect_source_files()
-                fingerprint = self._compute_source_fingerprint(source_files)
-
-                if source_files:
-                    return self._rebuild_retriever(source_files, fingerprint)
-
-                # No files left
-                self.retriever = None
-                self._save_fingerprint(None)
-                self._loaded_fingerprint = None
-
-                try:
-                    cleanup_store = self._create_vectorstore()
-                    cleanup_store.delete_collection()
-                except Exception:
-                    pass
-
-                logger.info("No source files left. Cleared retriever state.")
-                return True
-
-        except Exception as exc:
-            logger.error("Failed to rebuild index: %s", exc, exc_info=True)
-            return False
-
-    # =========================================================
     # RETRIEVAL HELPERS
     # =========================================================
-    def _retrieve_documents(self, question: str) -> List[Document]:
-        if self.retriever is None:
+    def _retrieve_documents(self, question: str, user_id: int) -> List[Document]:
+        retriever = self._get_user_retriever(user_id)
+        if retriever is None:
             return []
 
         try:
-            docs = self.retriever.invoke(question)
+            docs = retriever.invoke(question)
             if isinstance(docs, list):
                 return docs[: self.MAX_RETRIEVED_DOCS]
         except Exception:
             pass
 
         try:
-            docs = self.retriever.get_relevant_documents(question)
+            docs = retriever.get_relevant_documents(question)
             return docs[: self.MAX_RETRIEVED_DOCS] if docs else []
         except Exception as exc:
-            logger.warning("Retrieval failed: %s", exc)
+            logger.warning("Retrieval failed for user %d: %s", user_id, exc)
             return []
 
     def _build_context(self, docs: List[Document]) -> str:
@@ -535,7 +378,7 @@ class RAGService:
             history_text = "No previous conversation."
 
         prompt = f"""
-You are a helpful college assistant AI that answers questions using uploaded documents.
+You are a helpful AI assistant that answers questions using uploaded documents.
 
 RULES:
 1. Use ONLY the KNOWLEDGE BASE as your factual source.
@@ -544,7 +387,7 @@ RULES:
 4. If the answer is not clearly supported by the knowledge base, say exactly:
    "I couldn't find that in the uploaded documents."
 5. Keep the answer clear, useful, and accurate.
-6. If relevant, explain in simple student-friendly language.
+6. If relevant, explain in simple friendly language.
 7. {style_instruction}
 
 CONVERSATION HISTORY:
@@ -565,16 +408,8 @@ FINAL ANSWER:
     # MAIN RESPONSE METHODS
     # =========================================================
     def get_response_for_session(self, question: str, user_id: int, session_id: int) -> dict:
-        """
-        Returns:
-        {
-            "answer": "...",
-            "sources": ["file1.pdf", "file2.docx"]
-        }
-        """
         try:
             self._ensure_initialized()
-            self._ensure_retriever_ready()
         except Exception as exc:
             logger.error("RAG initialization failed: %s", exc, exc_info=True)
             return {
@@ -589,7 +424,7 @@ FINAL ANSWER:
         else:
             style_instruction = "Start with a short, friendly greeting."
 
-        db_docs = self._retrieve_documents(question)
+        db_docs = self._retrieve_documents(question, user_id)
         db_context = self._build_context(db_docs)
         sources = self._extract_sources(db_docs)
 
@@ -611,7 +446,6 @@ FINAL ANSWER:
             if not response_text:
                 response_text = "I couldn't generate a response right now. Please try again."
 
-            # Save ONLY answer (not sources) in memory
             self._store_session_conversation(user_id, session_id, question, response_text)
 
             return {
@@ -630,106 +464,113 @@ FINAL ANSWER:
         return self.get_response_for_session(question=question, user_id=user_id, session_id=0)
 
     # =========================================================
-    # FILE INGESTION / FILE MANAGEMENT
+    # FILE INGESTION (from PostgreSQL bytes)
     # =========================================================
-    def ingest_uploaded_file(self, file_path: Path) -> bool:
+    def ingest_document(self, file_content: bytes, filename: str, user_id: int) -> bool:
         """
-        Incrementally ingest a single uploaded file.
+        Ingest a document from PostgreSQL binary content into user's vector store.
         """
         try:
             self._ensure_initialized()
-            self._ensure_retriever_ready()
 
-            documents = self._load_documents([file_path])
+            documents = self._load_documents_from_bytes(file_content, filename, user_id)
             if not documents:
-                logger.warning("No content extracted from %s", file_path)
+                logger.warning("No content extracted from %s for user %d", filename, user_id)
                 return False
 
-            with self._index_lock:
-                if self.retriever is None:
-                    docstore = self._load_docstore() if self.docstore_file.exists() else InMemoryStore()
-                    self.retriever = self._build_retriever(docstore)
+            lock = self._get_user_lock(user_id)
+            with lock:
+                if user_id not in self._user_retrievers:
+                    docstore = self._load_user_docstore(user_id)
+                    retriever = self._build_retriever(user_id, docstore)
+                    self._user_retrievers[user_id] = retriever
+                    self._user_docstores[user_id] = docstore
 
-                self.retriever.add_documents(documents, ids=None)
+                retriever = self._user_retrievers[user_id]
+                retriever.add_documents(documents, ids=None)
 
                 # Save docstore
-                if hasattr(self.retriever, "docstore"):
-                    self._save_docstore(self.retriever.docstore)
+                if hasattr(retriever, "docstore"):
+                    self._save_user_docstore(user_id, retriever.docstore)
 
                 # Persist vectorstore
                 try:
-                    if hasattr(self.retriever, "vectorstore") and self.retriever.vectorstore is not None:
-                        self.retriever.vectorstore.persist()
+                    if hasattr(retriever, "vectorstore") and retriever.vectorstore is not None:
+                        retriever.vectorstore.persist()
                 except Exception:
                     pass
 
-                # Update fingerprint
-                source_files = self._collect_source_files()
-                fingerprint = self._compute_source_fingerprint(source_files)
-                self._save_fingerprint(fingerprint)
-                self._loaded_fingerprint = fingerprint
-
             logger.info(
-                "Successfully ingested file: %s (%d docs)",
-                file_path.name,
-                len(documents),
+                "Successfully ingested file: %s (%d docs) for user %d",
+                filename, len(documents), user_id,
             )
             return True
 
         except Exception as exc:
-            logger.error("Failed to ingest file %s: %s", file_path, exc, exc_info=True)
+            logger.error("Failed to ingest file %s for user %d: %s", filename, user_id, exc, exc_info=True)
             return False
 
-    def get_uploaded_files(self) -> List[Dict[str, str]]:
-        upload_dir = Path("temp_uploads")
-        if not upload_dir.exists():
-            return []
-
-        allowed = {".txt", ".pdf", ".docx", ".md"}
-        files = []
-
-        for f in sorted(upload_dir.iterdir()):
-            if f.is_file() and f.suffix.lower() in allowed:
-                files.append(
-                    {
-                        "name": f.name,
-                        "size": f.stat().st_size,
-                    }
-                )
-
-        return files
-
-    def delete_uploaded_file(self, filename: str) -> bool:
+    def rebuild_user_index(self, user_id: int, documents_data: List[dict]) -> bool:
         """
-        Delete uploaded file and rebuild index so vectors are removed too.
+        Rebuild vector index for a user from a list of document dicts.
+        Each dict has: {"filename": str, "file_content": bytes}
         """
-        upload_dir = Path("temp_uploads").resolve()
-        file_path = (upload_dir / filename).resolve()
-
-        # Safe path check
         try:
-            file_path.relative_to(upload_dir)
-        except ValueError:
-            logger.warning("Blocked invalid delete path attempt: %s", file_path)
-            return False
+            self._ensure_initialized()
 
-        if not file_path.exists() or not file_path.is_file():
-            return False
+            lock = self._get_user_lock(user_id)
+            with lock:
+                # Delete old collection
+                try:
+                    old_vs = self._create_vectorstore(user_id)
+                    old_vs.delete_collection()
+                    logger.info("Deleted old Chroma collection for user %d", user_id)
+                except Exception as exc:
+                    logger.info("Could not delete old collection for user %d: %s", user_id, exc)
 
-        try:
-            file_path.unlink()
-            logger.info("Deleted uploaded file: %s", file_path.name)
+                if not documents_data:
+                    # No docs left - clear retriever
+                    self._user_retrievers.pop(user_id, None)
+                    self._user_docstores.pop(user_id, None)
+                    docstore_file = self._user_docstore_file(user_id)
+                    if docstore_file.exists():
+                        docstore_file.unlink()
+                    logger.info("Cleared vector index for user %d (no documents left)", user_id)
+                    return True
 
-            # IMPORTANT: rebuild so deleted file content is removed from vector DB
-            rebuild_ok = self.rebuild_index_now()
-            if not rebuild_ok:
-                logger.warning("File deleted but index rebuild failed.")
-                return False
+                # Load all documents
+                all_docs: List[Document] = []
+                for doc_data in documents_data:
+                    docs = self._load_documents_from_bytes(
+                        doc_data["file_content"],
+                        doc_data["filename"],
+                        user_id,
+                    )
+                    all_docs.extend(docs)
 
-            return True
+                if not all_docs:
+                    logger.warning("No extractable content for user %d", user_id)
+                    return False
+
+                docstore = InMemoryStore()
+                vectorstore = self._create_vectorstore(user_id)
+                retriever = self._build_retriever(user_id, docstore, vectorstore=vectorstore)
+                retriever.add_documents(all_docs, ids=None)
+
+                self._save_user_docstore(user_id, docstore)
+                try:
+                    vectorstore.persist()
+                except Exception:
+                    pass
+
+                self._user_retrievers[user_id] = retriever
+                self._user_docstores[user_id] = docstore
+
+                logger.info("Rebuilt vector index for user %d with %d documents", user_id, len(all_docs))
+                return True
 
         except Exception as exc:
-            logger.error("Failed to delete file %s: %s", filename, exc, exc_info=True)
+            logger.error("Failed to rebuild index for user %d: %s", user_id, exc, exc_info=True)
             return False
 
 

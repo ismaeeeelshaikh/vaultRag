@@ -1,8 +1,0 @@
-◦ A list of currently open sockets
-◦ The applications listening on open sockets
-◦ A list of the systems that have current or recent connections to the system
-• To collect the live data in this list, you can take these steps:
-1. Execute a trusted shell.
-2. Record the system time and date.
-3. Determine who is logged on to the system.
-4. Record modification, creation, and access times of all 

@@ -35,7 +35,7 @@ const ChatSessionLayout = () => {
   // REMOVED: Auto-creation useEffect - no longer needed!
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col bg-[#050505]">
       <Header />
       <div className="flex-1 flex overflow-hidden">
         <ChatSessionsSidebar
@@ -45,7 +45,7 @@ const ChatSessionLayout = () => {
           onSelectSession={handleSelectSession}
           onUpdateTitle={updateSessionTitle}
           onDeleteSession={deleteSession}
-          isNewChat={isNewChat} // NEW: Pass isNewChat state
+          isNewChat={isNewChat}
         />
         <ChatInterface
           messages={currentMessages}
@@ -53,7 +53,7 @@ const ChatSessionLayout = () => {
           loading={loading}
           error={error}
           currentSession={currentSession}
-          isNewChat={isNewChat} // NEW: Pass isNewChat state
+          isNewChat={isNewChat}
         />
       </div>
     </div>
