@@ -21,7 +21,8 @@ class ChatService:
     @staticmethod
     async def create_chat(user_id: int, question: str, db: AsyncSession) -> ChatResponse:
         # Get AI response
-        answer = rag_service.get_response(question, user_id)
+        result = rag_service.get_response(question, user_id)
+        answer = result["answer"] if isinstance(result, dict) else result
         
         # Save to database
         chat = Chat(

@@ -11,3 +11,5 @@ frontend/node_modules/
 __pycache__/
 .DS_Store
 .pkl
+
+backend/temp_uploads/

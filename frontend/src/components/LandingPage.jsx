@@ -481,7 +481,7 @@ export default function LandingPage() {
             <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrollY > 20 ? 'bg-[#090C15]/90 backdrop-blur-md shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] border-b border-[#1E293B]' : 'bg-transparent'}`}>
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between relative">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-[#121827] border border-[#1E293B] flex items-center justify-center text-lg shadow-[0_0_10px_rgba(232,125,32,0.3)]">🛡️</div>
+                        <VaultRAGLogo className="w-10 h-10" />
                         <span className="text-xl font-extrabold font-display tracking-tight text-white">
                             VAULT<span className="text-transparent bg-clip-text bg-gradient-to-r from-[#E87D20] to-[#FF512F]">RAG</span>
                         </span>

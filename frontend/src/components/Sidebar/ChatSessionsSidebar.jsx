@@ -62,18 +62,8 @@ const ChatSessionsSidebar = ({
 
   return (
     <div className="w-80 bg-[#0D1220]/95 backdrop-blur-md border-r border-[#1E293B] text-white h-full flex flex-col">
-      {/* Header with Logo */}
+      {/* Header with New Chat Button */}
       <div className="p-4 border-b border-[#1E293B]">
-        <div className="flex items-center gap-3 mb-4">
-          <VaultRAGLogo className="w-10 h-10" />
-          <div>
-            <h1 className="text-lg font-bold bg-gradient-to-r from-[#E87D20] to-[#FF512F] bg-clip-text text-transparent">
-              VaultRAG
-            </h1>
-            <p className="text-xs text-[#8B95A5]">Document Assistant</p>
-          </div>
-        </div>
-        
         <button
           onClick={onNewChat}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#E87D20] to-[#FF512F] hover:shadow-lg hover:shadow-[#E87D20]/30 rounded-xl transition-all duration-300 transform hover:scale-[1.02] focus:outline-none focus:ring-4 focus:ring-[#E87D20]/50 font-medium"
@@ -103,11 +93,11 @@ const ChatSessionsSidebar = ({
                 </div>
               </div>
               
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {sessions.map((session) => (
                   <div
                     key={session.id}
-                    className={`group relative p-3 rounded-xl cursor-pointer transition-all duration-200 ${
+                    className={`group relative p-2.5 rounded-xl cursor-pointer transition-all duration-200 ${
                       currentSession?.id === session.id
                         ? 'bg-gradient-to-r from-[#E87D20]/20 to-[#FF512F]/20 border-l-4 border-[#E87D20]'
                         : isNewChat
@@ -136,8 +126,8 @@ const ChatSessionsSidebar = ({
                           </div>
                         ) : (
                           <>
-                            <div className="flex items-start gap-2 mb-2">
-                              <MessageCircle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${
+                            <div className="flex items-start gap-2 mb-1">
+                              <MessageCircle className={`h-3.5 w-3.5 mt-0.5 flex-shrink-0 ${
                                 currentSession?.id === session.id ? 'text-[#E87D20]' : 'text-[#8B95A5]'
                               }`} />
                               <h3 className={`font-medium text-sm leading-tight ${
@@ -146,13 +136,13 @@ const ChatSessionsSidebar = ({
                                 {session.title}
                               </h3>
                             </div>
-                            <div className="flex items-center justify-between text-xs text-[#8B95A5] ml-6">
-                              <span className="flex items-center gap-1">
+                            <div className="flex items-center gap-1.5 text-xs text-[#8B95A5] ml-5">
+                              <span className="flex items-center gap-0.5">
                                 <Calendar className="h-3 w-3" />
                                 {formatDate(session.updated_at)}
                               </span>
                               {session.message_count > 0 && (
-                                <span className="px-2 py-0.5 bg-[#1E293B] rounded-full text-[10px]">
+                                <span className="px-1.5 py-0.5 bg-[#1E293B] rounded-full text-[10px]">
                                   {session.message_count} msgs
                                 </span>
                               )}

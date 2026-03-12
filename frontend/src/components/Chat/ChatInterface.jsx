@@ -138,7 +138,7 @@ const ChatMessage = ({ message }) => {
   );
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       <div className={`flex max-w-3xl ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
         <div className={`flex-shrink-0 ${isUser ? 'ml-3' : 'mr-3'}`}>
           <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
@@ -379,7 +379,7 @@ const ChatInput = ({ onSendMessage, disabled }) => {
   };
 
   return (
-    <div className="relative border-t border-[#1E293B] bg-[#0D1220]/80 backdrop-blur-md px-4 py-3">
+    <div className="border-t border-[#1E293B] bg-[#0D1220]/80 backdrop-blur-md px-4 py-2.5">
       {/* Error message */}
       {error && (
         <div className="absolute bottom-full left-0 right-0 px-4 pb-2">
@@ -460,7 +460,7 @@ const ChatInput = ({ onSendMessage, disabled }) => {
       </form>
 
       {/* Help text */}
-      <div className="mt-2 text-xs text-[#8B95A5] text-center">
+      <div className="mt-1.5 text-xs text-[#8B95A5] text-center">
         {!isSupported
           ? 'Speech recognition not supported - Please use Chrome, Edge, or Safari'
           : !permissionGranted
@@ -523,7 +523,7 @@ const ChatInterface = ({ messages, onSendMessage, loading, error, currentSession
         )}
         
         {/* Messages Area - Scrollable */}
-        <div className="flex-1 overflow-y-auto p-4 min-h-0">{messages.length === 0 ? (
+        <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2 min-h-0">{messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-4xl px-4">
                 <VaultRAGLogo className="w-20 h-20 mx-auto mb-6" />
@@ -566,7 +566,7 @@ const ChatInterface = ({ messages, onSendMessage, loading, error, currentSession
               </div>
             </div>
           ) : (
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-4xl mx-auto pb-2">
               {messages.map((message, index) => (
                 <ChatMessage key={index} message={message} />
               ))}
@@ -600,7 +600,7 @@ const ChatInterface = ({ messages, onSendMessage, loading, error, currentSession
         </div>
         
         {/* Input Area - Fixed at Bottom */}
-        <div className="flex-shrink-0 bg-[#050505] relative">
+        <div className="flex-shrink-0">
           <ChatInput onSendMessage={onSendMessage} disabled={loading} />
         </div>
       </div>

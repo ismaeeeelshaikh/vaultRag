@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LogOut, User } from 'lucide-react';
+import { LogOut, User, FolderUp } from 'lucide-react';
+import DocumentUpload from '../Documents/DocumentUpload';
 
 /* VaultRAG Logo Component */
 function VaultRAGLogo({ className = "w-10 h-10" }) {
@@ -22,6 +23,7 @@ function VaultRAGLogo({ className = "w-10 h-10" }) {
 
 const Header = () => {
   const { user, logout } = useAuth();
+  const [showUpload, setShowUpload] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -63,6 +65,14 @@ const Header = () => {
               </span>
             </div>
             <button
+              onClick={() => setShowUpload(true)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-[#1E293B]/50 hover:bg-[#1E293B] border border-[#E87D20]/30 text-[#E87D20] hover:text-[#FF512F] rounded-lg transition-all duration-300"
+              title="Upload Documents"
+            >
+              <FolderUp className="h-4 w-4" />
+              <span className="text-sm font-medium">Documents</span>
+            </button>
+            <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-[#E87D20]/20 to-[#FF512F]/20 hover:from-[#E87D20]/30 hover:to-[#FF512F]/30 border border-[#E87D20]/30 text-[#E87D20] hover:text-[#FF512F] rounded-lg transition-all duration-300"
               title="Logout"
@@ -73,6 +83,7 @@ const Header = () => {
           </div>
         </div>
       </div>
+      <DocumentUpload isOpen={showUpload} onClose={() => setShowUpload(false)} />
     </header>
   );
 };
