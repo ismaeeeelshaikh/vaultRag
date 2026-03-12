@@ -6,33 +6,20 @@ export default {
   ],
   theme: {
     extend: {
-  colors: {
-    // Dashboard dark background
-    background: {
-      dark: '#131827',   // main bg
-      card: '#23263b',   // chat cards/sidebar
+      colors: {
+        background: {
+          dark: '#050308',
+          card: '#0c0a10',
+        },
+        primary: {
+          500: '#a78bfa',
+          600: '#7c3aed',
+        },
+        cyan: {
+          500: '#00f2ff',
+        }
+      },
     },
-    // Accent
-    accent: {
-      DEFAULT: '#a78bfa', // soft purple for highlights and headings
-      light: '#c8b6ff'
-    },
-    // Primary button and chat bubble
-    primary: {
-      50: '#f5f3ff',
-      100: '#ede9fe',
-      500: '#a78bfa',    // violet-400 (for buttons, main highlight)
-      600: '#7c3aed',    // violet-600 (for hover, active)
-      700: '#6d28d9',    // violet-700 (for dark accent)
-    },
-    // Optional for info boxes and clickable links
-    blue: {
-      400: '#60a5fa',
-      500: '#3b82f6',
-      600: '#2563eb',
-    }
-  }
-},
   },
   plugins: [],
 }

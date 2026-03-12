@@ -9,16 +9,17 @@ import ForgotPassword from "./components/Auth/ForgotPassword";
 import ResetPassword from "./components/Auth/ResetPassword";
 import VerifySignupOtp from "./components/Auth/VerifySignupOtp";
 
-
 const PrivateRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-background-dark">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <div className="relative w-16 h-16 mx-auto">
+            <div className="absolute inset-0 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+          <p className="mt-4 text-primary-500 text-sm">Loading...</p>
         </div>
       </div>
     );
@@ -31,14 +32,14 @@ function App() {
   return (
     <AuthProvider>
       <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <div className="App">
+        <div className="App bg-background-dark min-h-screen">
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
-             <Route path="/forgot-password" element={<ForgotPassword />} />
-             <Route path="/reset-password" element={<ResetPassword />} />
-             <Route path="/verify-signup-otp" element={<VerifySignupOtp />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/verify-signup-otp" element={<VerifySignupOtp />} />
 
             <Route
               path="/chat"
