@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
+import api from '../../services/api';
 
 /* VaultRAG Logo Component */
 function VaultRAGLogo({ className = "w-10 h-10" }) {
@@ -185,15 +186,7 @@ const Register = () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/request-signup-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email.trim().toLowerCase() }),
-      });
-      const result = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(result?.detail || 'Failed to send OTP');
-      }
+      await api.post('/auth/request-signup-otp', { email: formData.email.trim().toLowerCase() });
 
       navigate('/verify-signup-otp', { state: {
         username: formData.username,
@@ -201,7 +194,7 @@ const Register = () => {
         password: formData.password
       }});
     } catch (err) {
-      setError(err.message || 'Could not send OTP. Please try again.');
+      setError(err.response?.data?.detail || err.message || 'Could not send OTP. Please try again.');
     } finally {
       setLoading(false);
     }

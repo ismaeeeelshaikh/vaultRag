@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
+import api from '../../services/api';
 
 /* VaultRAG Logo Component */
 function VaultRAGLogo({ className = "w-10 h-10" }) {
@@ -146,20 +147,12 @@ const VerifySignupOtp = () => {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/complete-signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, password, otp }),
-      });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(result?.detail || 'OTP verification failed');
-      }
+      await api.post('/auth/complete-signup', { username, email, password, otp });
 
       // On success redirect to login page or dashboard
       navigate('/login');
     } catch (err) {
-      setError(err.message || 'Failed to verify OTP. Please try again.');
+      setError(err.response?.data?.detail || err.message || 'Failed to verify OTP. Please try again.');
     } finally {
       setLoading(false);
     }
